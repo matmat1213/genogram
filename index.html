@@ -161,6 +161,12 @@
       </div>
 
       <div class="sec">
+        <h2>自由テキスト</h2>
+        <button class="btn" onclick="addText()">🅣 テキストを追加</button>
+        <div class="empty">「〇〇市在住」などのメモを好きな位置に置けます。追加後ドラッグで移動、タップで内容を編集できます。</div>
+      </div>
+
+      <div class="sec">
         <h2>関係でつなぐ <span style="font-weight:400;color:var(--muted)">（人物を選択）</span></h2>
         <button class="btn" id="multiBtn" onclick="toggleMulti()">☑️ 複数選択モード：OFF</button>
         <div class="empty" id="rel-hint">2人以上を選ぶときは「複数選択モード」をONにして、人物を順にタップ。番号①②…の順で結ばれます（スマホはこの方法）。</div>
@@ -234,7 +240,7 @@
 "use strict";
 
 // ---------- 状態 ----------
-let state = { nodes: [], partners: [], children: [], households: [], title: "" };
+let state = { nodes: [], partners: [], children: [], households: [], texts: [], title: "" };
 let selection = [];            // 選択中ノードidの配列（順序保持）
 let selEl = null;              // 選択中の線・枠 {type:'partner'|'child'|'household', id}
 let multiMode = false;         // 複数選択モード（スマホでも複数選べる）
@@ -273,6 +279,20 @@ function getNode(id){ return state.nodes.find(n => n.id === id); }
 function setTitle(v){ state.title = v; save(); }
 function syncTitleInput(){ const el=document.getElementById("clientName"); if(el) el.value = state.title || ""; }
 
+// 自由テキスト
+function getText(id){ return (state.texts||[]).find(t=>t.id===id); }
+function addText(){
+  if(!state.texts) state.texts=[];
+  const cx = Math.round(clampX(view.x + view.w/2));
+  const cy = Math.round(clampY(view.y + view.h/2));
+  const t = { id:uid("t"), x:cx, y:cy, text:"テキスト", size:16 };
+  state.texts.push(t);
+  selEl = {type:'text', id:t.id}; selection=[];
+  updatePanel(); save();
+  setTimeout(()=>{ const el=document.getElementById("textEdit"); if(el){ el.focus(); el.select(); } }, 0);
+}
+function updText(key,val){ const t=getText(selEl && selEl.id); if(!t) return; t[key]=val; render(); save(); }
+
 // テンプレート
 function mkNode(sex,x,y,name){
   const n={id:uid("n"),sex,x,y,name,age:"",deceased:false,client:false,keyperson:false,adopted:false};
@@ -281,7 +301,7 @@ function mkNode(sex,x,y,name){
 function applyTemplate(kind){
   if(state.nodes.length && !confirm("現在の作図内容を消してテンプレートを読み込みます。よろしいですか？\n（必要なら先に「データ保存」をしてください）")) return;
   const keepTitle = state.title || "";
-  state = { nodes:[], partners:[], children:[], households:[], title: keepTitle };
+  state = { nodes:[], partners:[], children:[], households:[], texts:[], title: keepTitle };
   selection=[]; selEl=null;
   if(kind==='couple'){
     const h=mkNode('male',320,210,'夫'), w=mkNode('female',480,210,'妻');
@@ -341,6 +361,7 @@ function deleteElement(){
   if(selEl.type==='partner')   state.partners   = state.partners.filter(p=>p.id!==selEl.id);
   else if(selEl.type==='child')     state.children   = state.children.filter(c=>c.id!==selEl.id);
   else if(selEl.type==='household')  state.households = state.households.filter(h=>h.id!==selEl.id);
+  else if(selEl.type==='text')       state.texts = (state.texts||[]).filter(t=>t.id!==selEl.id);
   status("削除しました。");
   selEl = null; updatePanel(); save();
 }
@@ -393,6 +414,19 @@ function makeHousehold(){
 // ---------- プロパティパネル ----------
 function updatePanel(){
   const body = document.getElementById("prop-body");
+  if(selEl && selEl.type==='text'){
+    const t = getText(selEl.id);
+    body.innerHTML = `
+      <div class="field"><label>テキスト内容</label>
+        <input type="text" id="textEdit" value="${escapeAttr(t?t.text:'')}" oninput="updText('text',this.value)" placeholder="例：〇〇市在住"></div>
+      <div class="field"><label>文字サイズ</label>
+        <select onchange="updText('size',parseInt(this.value,10))">
+          ${[12,14,16,20,24,30].map(s=>`<option value="${s}" ${t&&t.size==s?'selected':''}>${s}</option>`).join("")}
+        </select></div>
+      <button class="btn danger" onclick="deleteElement()">🗑 このテキストを削除</button>`;
+    render();
+    return;
+  }
   if(selEl){
     let label = "要素";
     if(selEl.type==='partner'){
@@ -522,6 +556,31 @@ function render(){
       const len = Math.hypot(dxp,dyp)||1; const ux=dxp/len*2.2, uy=dyp/len*2.2;
       g.appendChild(line(x1+ux,y1+uy,x2+ux,y2+uy,col));
       g.appendChild(line(x1-ux,y1-uy,x2-ux,y2-uy,col));
+    }
+    svg.appendChild(g);
+  }
+
+  // 3.5) 自由テキスト
+  for(const t of (state.texts||[])){
+    const g = document.createElementNS(NS,"g");
+    g.setAttribute("class","text-hit"); g.dataset.tid = t.id; g.style.cursor="move";
+    const tsel = isElSel('text', t.id);
+    const fs = t.size || 16;
+    const str = (t.text==null||t.text==="") ? "（テキスト）" : t.text;
+    const w = Math.max(24, [...str].length * fs * 0.95);
+    // つかみやすい透明領域
+    const hit = rect(t.x - w/2 - 5, t.y - fs, w + 10, fs + 12);
+    hit.setAttribute("fill","transparent"); hit.setAttribute("pointer-events","all");
+    g.appendChild(hit);
+    const tx = text(t.x, t.y, str, fs);
+    if(tsel) tx.setAttribute("fill", COLORS.sel);
+    g.appendChild(tx);
+    if(tsel){
+      const box = rect(t.x - w/2 - 5, t.y - fs, w + 10, fs + 12);
+      box.setAttribute("class","selbox");
+      box.setAttribute("fill","none"); box.setAttribute("stroke",COLORS.sel);
+      box.setAttribute("stroke-width","1"); box.setAttribute("stroke-dasharray","4 3");
+      g.appendChild(box);
     }
     svg.appendChild(g);
   }
@@ -727,6 +786,12 @@ svg.addEventListener("pointerdown", (ev) => {
     drag = { id:g.dataset.id, dx:n.x-pt.x, dy:n.y-pt.y, sx:pt.x, sy:pt.y, moved:false };
     return;
   }
+  const tg = ev.target.closest(".text-hit");
+  if(tg){
+    const t = getText(tg.dataset.tid); const pt = svgPoint(ev);
+    drag = { id:t.id, kind:'text', dx:t.x-pt.x, dy:t.y-pt.y, sx:pt.x, sy:pt.y, moved:false };
+    return;
+  }
   const el = ev.target.closest("[data-el]");
   if(el){ selectElement(el.dataset.el, el.dataset.id); return; }
 
@@ -749,9 +814,10 @@ svg.addEventListener("pointermove",(ev)=>{
   if(drag){
     const pt = svgPoint(ev);
     if(!drag.moved && Math.hypot(pt.x-drag.sx, pt.y-drag.sy) < 5) return;
-    const n = getNode(drag.id); if(!n) return;
-    n.x = Math.round(clampX(pt.x + drag.dx));
-    n.y = Math.round(clampY(pt.y + drag.dy));
+    const obj = drag.kind==='text' ? getText(drag.id) : getNode(drag.id);
+    if(!obj) return;
+    obj.x = Math.round(clampX(pt.x + drag.dx));
+    obj.y = Math.round(clampY(pt.y + drag.dy));
     drag.moved = true; render();
     return;
   }
@@ -774,7 +840,9 @@ function endPointer(ev){
 
   if(drag){
     if(!drag.moved){
-      if(multiMode || ev.shiftKey){ toggleSelect(drag.id); } else { selectOnly(drag.id); }
+      if(drag.kind==='text'){ selectElement('text', drag.id); }
+      else if(multiMode || ev.shiftKey){ toggleSelect(drag.id); }
+      else { selectOnly(drag.id); }
       render();
     } else { save(); }
     drag = null; return;
@@ -828,9 +896,10 @@ function exportImage(type){
   const W = (b.w + margin*2), H = (b.h + margin*2);
 
   const clone = svg.cloneNode(true);
-  // 選択ハイライト・選択番号を消す
-  clone.querySelectorAll(".selnum").forEach(e=>e.remove());
+  // 選択ハイライト・選択番号・選択枠を消す
+  clone.querySelectorAll(".selnum, .selbox").forEach(e=>e.remove());
   clone.querySelectorAll("[stroke='"+COLORS.sel+"']").forEach(e=>e.setAttribute("stroke",COLORS.stroke));
+  clone.querySelectorAll("[fill='"+COLORS.sel+"']").forEach(e=>e.setAttribute("fill",COLORS.text));
   clone.setAttribute("width", W);
   clone.setAttribute("height", H);
   clone.setAttribute("viewBox", `${b.x-margin} ${b.y-margin} ${W} ${H}`);
@@ -864,6 +933,8 @@ function computeBounds(){
   for(const n of state.nodes){ xs.push(n.x-SIZE-30, n.x+SIZE+30); ys.push(n.y-SIZE-10, n.y+SIZE+30); }
   for(const h of state.households){ const ms=h.members.map(getNode).filter(Boolean);
     for(const m of ms){ xs.push(m.x-SIZE-50, m.x+SIZE+50); ys.push(m.y-SIZE-50, m.y+SIZE+50);} }
+  for(const t of (state.texts||[])){ const fs=t.size||16; const w=Math.max(24,[...((t.text||""))].length*fs*0.95);
+    xs.push(t.x-w/2-10, t.x+w/2+10); ys.push(t.y-fs-6, t.y+10); }
   const x=Math.min(...xs), y=Math.min(...ys);
   return { x, y, w: Math.max(...xs)-x, h: Math.max(...ys)-y };
 }
@@ -885,6 +956,7 @@ function loadJSON(ev){
     try{
       const o = JSON.parse(r.result);
       state = o.state; idc = o.idc || 1000;
+      if(!state.texts) state.texts = [];
       selection = []; selEl = null;
       syncTitleInput();
       render(); updatePanel(); fitView(); save();
@@ -896,7 +968,7 @@ function loadJSON(ev){
 }
 function clearAll(){
   if(!confirm("すべての内容を消去します。よろしいですか？")) return;
-  state = { nodes:[], partners:[], children:[], households:[], title:"" };
+  state = { nodes:[], partners:[], children:[], households:[], texts:[], title:"" };
   selection=[]; selEl=null; idc=1;
   syncTitleInput();
   view={x:0,y:0,w:VBW,h:VBH}; applyView();
@@ -907,7 +979,7 @@ function clearAll(){
 function save(){ try{ localStorage.setItem("genogram", JSON.stringify({state, idc})); }catch(e){} }
 function load(){
   try{ const o = JSON.parse(localStorage.getItem("genogram"));
-    if(o && o.state){ state=o.state; idc=o.idc||1; } }catch(e){}
+    if(o && o.state){ state=o.state; idc=o.idc||1; if(!state.texts) state.texts=[]; } }catch(e){}
 }
 
 function status(msg){ document.getElementById("status").textContent = msg; }
