@@ -161,6 +161,7 @@
           <div class="legend">
             ・結婚／離婚／内縁は、2人をクリックで選んでボタン。<br>
             ・親子は「親→子」の順にクリック。両親がいる場合は<br>　〔父・母（夫婦線で結んだ2人）＋子〕の3人を選んで「親子」。<br>
+            ・<b>線や枠（同居の囲み）をクリックすると選択でき、その線・枠だけを削除できます。</b><br>
             ・図形はドラッグで移動。<kbd>Delete</kbd>で選択中を削除。
           </div>
         </details>
@@ -179,6 +180,7 @@
 // ---------- 状態 ----------
 let state = { nodes: [], partners: [], children: [], households: [], title: "" };
 let selection = [];            // 選択中ノードidの配列（順序保持）
+let selEl = null;              // 選択中の線・枠 {type:'partner'|'child'|'household', id}
 let idc = 1;
 const NS = "http://www.w3.org/2000/svg";
 const svg = document.getElementById("svg");
@@ -221,13 +223,26 @@ function deleteSelected(){
 }
 
 // ---------- 選択 ----------
-function selectOnly(id){ selection = [id]; updatePanel(); }
+function selectOnly(id){ selEl = null; selection = [id]; updatePanel(); }
 function toggleSelect(id){
+  selEl = null;
   const i = selection.indexOf(id);
   if(i>=0) selection.splice(i,1); else selection.push(id);
   updatePanel();
 }
-function clearSelection(){ selection = []; updatePanel(); render(); }
+function clearSelection(){ selection = []; selEl = null; updatePanel(); render(); }
+
+// 線・枠の選択／削除
+function selectElement(type, id){ selEl = {type, id}; selection = []; updatePanel(); }
+function isElSel(type, id){ return !!selEl && selEl.type===type && selEl.id===id; }
+function deleteElement(){
+  if(!selEl) return;
+  if(selEl.type==='partner')   state.partners   = state.partners.filter(p=>p.id!==selEl.id);
+  else if(selEl.type==='child')     state.children   = state.children.filter(c=>c.id!==selEl.id);
+  else if(selEl.type==='household')  state.households = state.households.filter(h=>h.id!==selEl.id);
+  status("削除しました。");
+  selEl = null; updatePanel(); save();
+}
 
 // ---------- 関係 ----------
 function connect(type){
@@ -277,6 +292,19 @@ function makeHousehold(){
 // ---------- プロパティパネル ----------
 function updatePanel(){
   const body = document.getElementById("prop-body");
+  if(selEl){
+    let label = "要素";
+    if(selEl.type==='partner'){
+      const e = state.partners.find(p=>p.id===selEl.id);
+      label = ({marriage:'結婚',commonlaw:'内縁',divorce:'離婚'}[e&&e.type]||'') + 'の線';
+    } else if(selEl.type==='child'){ label = '親子の線'; }
+    else if(selEl.type==='household'){ label = '同居の枠'; }
+    const word = selEl.type==='household' ? 'この枠' : 'この線';
+    body.innerHTML = `<div class="empty">「<b style="color:var(--text)">${label}</b>」を選択中です。<br><br>
+      <button class="btn danger" onclick="deleteElement()">🗑 ${word}を削除</button></div>`;
+    render();
+    return;
+  }
   if(selection.length === 1){
     const n = getNode(selection[0]);
     body.innerHTML = `
@@ -325,13 +353,21 @@ function render(){
     const x = Math.min(...xs)-pad, y=Math.min(...ys)-pad;
     const w = Math.max(...xs)-Math.min(...xs)+pad*2;
     const hh= Math.max(...ys)-Math.min(...ys)+pad*2;
+    const hsel = isElSel('household', h.id);
+    const g = elGroup('household', h.id);
+    const hit = rect(x,y,w,hh);
+    hit.setAttribute("rx","14"); hit.setAttribute("fill","none");
+    hit.setAttribute("stroke","transparent"); hit.setAttribute("stroke-width","14");
+    hit.setAttribute("pointer-events","stroke");
+    g.appendChild(hit);
     const r = rect(x,y,w,hh);
     r.setAttribute("rx","14");
     r.setAttribute("fill","none");
-    r.setAttribute("stroke","#7aa6b0");
-    r.setAttribute("stroke-width","1.4");
+    r.setAttribute("stroke", hsel ? COLORS.sel : "#7aa6b0");
+    r.setAttribute("stroke-width", hsel ? "2.6" : "1.4");
     r.setAttribute("stroke-dasharray","6 4");
-    svg.appendChild(r);
+    g.appendChild(r);
+    svg.appendChild(g);
   }
 
   // 2) 親子線
@@ -346,31 +382,42 @@ function render(){
       sx = a.x; sy = a.y + SIZE;                  // ひとり親は下端から
     }
     const busY = Math.min(sy, child.y) + Math.abs(child.y - sy)/2;
-    const topY = child.y - SIZE - (child.sex==='male'?0:0);
-    drawPath(`M ${sx} ${sy} V ${busY} H ${child.x} V ${child.y - SIZE}`);
+    const d = `M ${sx} ${sy} V ${busY} H ${child.x} V ${child.y - SIZE}`;
+    const csel = isElSel('child', c.id);
+    const g = elGroup('child', c.id);
+    g.appendChild(pathEl(d, "transparent", 14));
+    g.appendChild(pathEl(d, csel?COLORS.sel:COLORS.line, csel?2.8:1.7));
+    svg.appendChild(g);
   }
 
   // 3) パートナー線（結婚・離婚・内縁）
   for(const e of state.partners){
     const a=getNode(e.a), b=getNode(e.b); if(!a||!b) continue;
     const x1=a.x, y1=a.y, x2=b.x, y2=b.y;
+    const psel = isElSel('partner', e.id);
+    const col = psel ? COLORS.sel : COLORS.line;
+    const g = elGroup('partner', e.id);
+    const hit = line(x1,y1,x2,y2,"transparent");
+    hit.setAttribute("stroke-width","14"); hit.setAttribute("pointer-events","stroke");
+    g.appendChild(hit);
     if(e.type === 'commonlaw'){
-      const l = line(x1,y1,x2,y2); l.setAttribute("stroke-dasharray","5 4"); svg.appendChild(l);
+      const l = line(x1,y1,x2,y2,col); l.setAttribute("stroke-dasharray","5 4"); g.appendChild(l);
     } else if(e.type === 'divorce'){
-      svg.appendChild(line(x1,y1,x2,y2));
+      g.appendChild(line(x1,y1,x2,y2,col));
       // 中点付近に // のスラッシュ2本（離婚記号）
       const mx=(x1+x2)/2, my=(y1+y2)/2;
       const ang=Math.atan2(y2-y1,x2-x1);
       for(const d of [-6,6]){
         const cx=mx + Math.cos(ang)*d, cy=my + Math.sin(ang)*d;
-        svg.appendChild(slash(cx, cy, ang));
+        const s=slash(cx, cy, ang); s.setAttribute("stroke",col); g.appendChild(s);
       }
     } else { // marriage = 二重線
       const dxp = (y2-y1), dyp = -(x2-x1);
       const len = Math.hypot(dxp,dyp)||1; const ux=dxp/len*2.2, uy=dyp/len*2.2;
-      svg.appendChild(line(x1+ux,y1+uy,x2+ux,y2+uy));
-      svg.appendChild(line(x1-ux,y1-uy,x2-ux,y2-uy));
+      g.appendChild(line(x1+ux,y1+uy,x2+ux,y2+uy,col));
+      g.appendChild(line(x1-ux,y1-uy,x2-ux,y2-uy,col));
     }
+    svg.appendChild(g);
   }
 
   // 4) ノード
@@ -440,6 +487,19 @@ function styleShape(el, sw, n, inner){
 }
 
 // SVGヘルパ
+function elGroup(type, id){
+  const g = document.createElementNS(NS,"g");
+  g.dataset.el = type; g.dataset.id = id;
+  g.style.cursor = "pointer";
+  return g;
+}
+function pathEl(d, stroke, w){
+  const e=document.createElementNS(NS,"path");
+  e.setAttribute("d",d); e.setAttribute("fill","none");
+  e.setAttribute("stroke",stroke); e.setAttribute("stroke-width",w);
+  if(stroke==="transparent") e.setAttribute("pointer-events","stroke");
+  return e;
+}
 function rect(x,y,w,h){ const e=document.createElementNS(NS,"rect"); e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("width",w);e.setAttribute("height",h); return e; }
 function circle(cx,cy,r){ const e=document.createElementNS(NS,"circle"); e.setAttribute("cx",cx);e.setAttribute("cy",cy);e.setAttribute("r",r); return e; }
 function triangle(cx,cy,r){ const e=document.createElementNS(NS,"polygon");
@@ -475,15 +535,22 @@ let drag = null;
 svg.addEventListener("pointerdown", (ev) => {
   const g = ev.target.closest(".node-hit");
   if(g){
+    selEl = null;
     const id = g.dataset.id;
     const n = getNode(id);
     const pt = svgPoint(ev);
-    drag = { id, dx: n.x-pt.x, dy: n.y-pt.y, moved:false, started:performance? performance.now():0 };
+    drag = { id, dx: n.x-pt.x, dy: n.y-pt.y, moved:false };
     svg.setPointerCapture(ev.pointerId);
-  } else {
-    // 背景クリック＝選択解除
-    if(!ev.shiftKey){ selection=[]; updatePanel(); }
+    return;
   }
+  // 線・枠のクリック＝その要素を選択
+  const el = ev.target.closest("[data-el]");
+  if(el){
+    selectElement(el.dataset.el, el.dataset.id);
+    return;
+  }
+  // 背景クリック＝選択解除
+  selection=[]; selEl=null; updatePanel();
 });
 svg.addEventListener("pointermove",(ev)=>{
   if(!drag) return;
@@ -523,8 +590,9 @@ function svgPoint(ev){
 }
 
 document.addEventListener("keydown",(e)=>{
-  if((e.key==="Delete"||e.key==="Backspace") && selection.length && !isTyping()){
-    e.preventDefault(); deleteSelected();
+  if((e.key==="Delete"||e.key==="Backspace") && !isTyping()){
+    if(selEl){ e.preventDefault(); deleteElement(); return; }
+    if(selection.length){ e.preventDefault(); deleteSelected(); }
   }
 });
 function isTyping(){ const t=document.activeElement; return t && (t.tagName==="INPUT"||t.tagName==="SELECT"||t.tagName==="TEXTAREA"); }
