@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ジェノグラム作成ツール</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --border: #d6dce3;
+    --accent: #2f7d8f;
+    --accent-dark: #226170;
+    --text: #20303a;
+    --muted: #6b7a85;
+    --danger: #c0492f;
+    --select: #ff8c42;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    overflow: hidden;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+  header {
+    background: var(--accent);
+    color: #fff;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .hint { font-size: 12px; opacity: .85; }
+  #main { flex: 1; display: flex; min-height: 0; }
+  #sidebar {
+    width: 270px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    flex-shrink: 0;
+    padding: 12px;
+  }
+  #canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #fff; }
+  svg { width: 100%; height: 100%; display: block; cursor: default; touch-action: none; }
+  .sec { margin-bottom: 16px; }
+  .sec h2 {
+    font-size: 12px; color: var(--muted); margin: 0 0 8px;
+    text-transform: none; letter-spacing: .04em; font-weight: 700;
+    border-bottom: 1px solid var(--border); padding-bottom: 4px;
+  }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: .12s;
+    width: 100%;
+    margin-bottom: 6px;
+  }
+  .btn:hover { background: #eef4f5; border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { background: var(--accent-dark); }
+  .btn.danger { color: var(--danger); }
+  .btn.danger:hover { background: #fbeae6; border-color: var(--danger); }
+  .btn-row { display: flex; gap: 6px; }
+  .btn-row .btn { margin-bottom: 6px; }
+  .field { margin-bottom: 8px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .field input[type=text], .field input[type=number], .field select {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; font-family: inherit;
+  }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 13px; margin-bottom: 6px; cursor: pointer; }
+  .check input { width: 16px; height: 16px; }
+  .empty { color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .legend { font-size: 11.5px; color: var(--muted); line-height: 1.7; }
+  .legend svg { display: inline; vertical-align: middle; width: 38px; height: 24px; }
+  .legend .row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+  #status { font-size: 12px; color: var(--muted); padding: 4px 0; min-height: 18px; }
+  .pill {
+    display:inline-block; background:#eef4f5; color:var(--accent-dark);
+    border-radius: 20px; padding: 2px 9px; font-size: 11px; margin: 0 4px 4px 0;
+  }
+  /* node visuals */
+  .node-hit { cursor: move; }
+  .selnum {
+    fill: var(--select); font-size: 13px; font-weight: 700;
+  }
+  details summary { cursor: pointer; font-size: 12px; color: var(--accent-dark); margin-bottom:6px; }
+  kbd { background:#eee; border:1px solid #ccc; border-radius:4px; padding:0 4px; font-size:11px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🧬 ジェノグラム作成ツール</h1>
+    <span class="hint">人物を追加 → ドラッグで配置 → 選んで関係線で結ぶ → 画像で保存</span>
+  </header>
+  <div id="main">
+    <div id="sidebar">
+      <div class="sec">
+        <h2>人物を追加</h2>
+        <div class="btn-row">
+          <button class="btn" onclick="addNode('male')">□ 男性</button>
+          <button class="btn" onclick="addNode('female')">○ 女性</button>
+        </div>
+        <button class="btn" onclick="addNode('unknown')">△ 性別不明</button>
+      </div>
+
+      <div class="sec">
+        <h2>関係でつなぐ <span style="font-weight:400;color:var(--muted)">（人物を選択）</span></h2>
+        <div class="empty" id="rel-hint">人物をクリックで選択（複数は続けてクリック）。番号①②の順で結ばれます。</div>
+        <button class="btn" onclick="connect('marriage')">⚭ 結婚（②を結ぶ）</button>
+        <button class="btn" onclick="connect('commonlaw')">〜 内縁・事実婚</button>
+        <button class="btn" onclick="connect('divorce')">／／ 離婚</button>
+        <button class="btn" onclick="connectChild()">↳ 親子（親→子の順で選択）</button>
+        <button class="btn" onclick="makeHousehold()">⬚ 同居の枠で囲む（複数選択）</button>
+        <button class="btn danger" onclick="clearSelection()">選択を解除</button>
+      </div>
+
+      <div class="sec" id="prop-sec">
+        <h2>選択中の人物</h2>
+        <div id="prop-body"><div class="empty">人物を1人選ぶと、ここで名前・年齢などを編集できます。</div></div>
+      </div>
+
+      <div class="sec">
+        <h2>保存・出力</h2>
+        <button class="btn primary" onclick="exportImage('png')">🖼 PNGで保存</button>
+        <button class="btn primary" onclick="exportImage('jpeg')">🖼 JPEGで保存</button>
+        <div class="btn-row">
+          <button class="btn" onclick="saveJSON()">💾 データ保存</button>
+          <button class="btn" onclick="document.getElementById('loadfile').click()">📂 読込</button>
+        </div>
+        <input type="file" id="loadfile" accept="application/json" style="display:none" onchange="loadJSON(event)" />
+        <button class="btn danger" onclick="clearAll()">🗑 すべて消す</button>
+        <div id="status"></div>
+      </div>
+
+      <div class="sec">
+        <h2>記号の凡例</h2>
+        <div class="legend">
+          <div class="row"><svg viewBox="0 0 40 24"><rect x="6" y="3" width="18" height="18" fill="none" stroke="#222" stroke-width="1.5"/></svg> 男性</div>
+          <div class="row"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="none" stroke="#222" stroke-width="1.5"/></svg> 女性</div>
+          <div class="row"><svg viewBox="0 0 40 24"><rect x="4" y="2" width="20" height="20" fill="none" stroke="#222" stroke-width="3"/></svg> 本人（二重枠）</div>
+          <div class="row"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="none" stroke="#222" stroke-width="1.5"/><line x1="6" y1="3" x2="24" y2="21" stroke="#222" stroke-width="1.5"/><line x1="24" y1="3" x2="6" y2="21" stroke="#222" stroke-width="1.5"/></svg> 死亡（×印）</div>
+          <div class="row"><svg viewBox="0 0 40 24"><polygon points="15,18 11,12 19,12" fill="#e6a700" stroke="#b58600" stroke-width="1"/></svg> キーパーソン（★）</div>
+          <div class="row">数字＝年齢、図形の下＝名前</div>
+        </div>
+        <details style="margin-top:8px">
+          <summary>つなぎ方のコツ</summary>
+          <div class="legend">
+            ・結婚／離婚／内縁は、2人をクリックで選んでボタン。<br>
+            ・親子は「親→子」の順にクリック。両親がいる場合は<br>　〔父・母（夫婦線で結んだ2人）＋子〕の3人を選んで「親子」。<br>
+            ・図形はドラッグで移動。<kbd>Delete</kbd>で選択中を削除。
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div id="canvas-wrap">
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- 状態 ----------
+let state = { nodes: [], partners: [], children: [], households: [], title: "" };
+let selection = [];            // 選択中ノードidの配列（順序保持）
+let idc = 1;
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("svg");
+
+const SIZE = 30;               // 図形の半径相当（四角は半辺）
+const COLORS = { stroke:"#1d2b33", text:"#1d2b33", line:"#1d2b33", sel:"#ff8c42", star:"#e6a700", starline:"#b58600" };
+
+function uid(p){ return p + (idc++); }
+
+// ---------- ノード操作 ----------
+function addNode(sex){
+  const n = {
+    id: uid("n"),
+    sex,                       // male / female / unknown
+    x: 140 + (state.nodes.length % 6) * 90,
+    y: 120 + Math.floor(state.nodes.length / 6) * 110,
+    name: "",
+    age: "",
+    deceased: false,
+    client: false,             // 本人
+    keyperson: false,
+    adopted: false
+  };
+  state.nodes.push(n);
+  selectOnly(n.id);
+  render(); save();
+}
+
+function getNode(id){ return state.nodes.find(n => n.id === id); }
+
+function deleteSelected(){
+  if(!selection.length) return;
+  const set = new Set(selection);
+  state.nodes = state.nodes.filter(n => !set.has(n.id));
+  state.partners = state.partners.filter(e => !set.has(e.a) && !set.has(e.b));
+  state.children = state.children.filter(c => !set.has(c.parentA) && !set.has(c.parentB) && !set.has(c.child));
+  state.households = state.households.filter(h => { h.members = h.members.filter(m=>!set.has(m)); return h.members.length>=2; });
+  selection = [];
+  render(); save();
+}
+
+// ---------- 選択 ----------
+function selectOnly(id){ selection = [id]; updatePanel(); }
+function toggleSelect(id){
+  const i = selection.indexOf(id);
+  if(i>=0) selection.splice(i,1); else selection.push(id);
+  updatePanel();
+}
+function clearSelection(){ selection = []; updatePanel(); render(); }
+
+// ---------- 関係 ----------
+function connect(type){
+  if(selection.length !== 2){ status("結婚・離婚・内縁は「2人」を選んでください。"); return; }
+  const [a,b] = selection;
+  // 既存の同じ2人間のパートナー関係を更新
+  let e = state.partners.find(p => (p.a===a&&p.b===b)||(p.a===b&&p.b===a));
+  if(e){ e.type = type; } else { state.partners.push({id:uid("p"), a, b, type}); }
+  status(({marriage:"結婚",commonlaw:"内縁",divorce:"離婚"})[type] + "線で結びました。");
+  render(); save();
+}
+
+function connectChild(){
+  if(selection.length === 2){
+    // 親→子（ひとり親）
+    const [parent, child] = selection;
+    state.children.push({id:uid("c"), parentA:parent, parentB:null, child});
+    status("親子（ひとり親）でつなぎました。");
+  } else if(selection.length === 3){
+    // 2人が夫婦（パートナー関係）なら親、残り1人が子
+    const ids = selection.slice();
+    let pair=null;
+    for(let i=0;i<ids.length;i++) for(let j=i+1;j<ids.length;j++){
+      if(partnerExists(ids[i],ids[j])) pair=[ids[i],ids[j]];
+    }
+    if(!pair){ status("両親の2人をあらかじめ『結婚／内縁』で結んでから、子を加えて3人選んでください。"); return; }
+    const child = ids.find(x => x!==pair[0] && x!==pair[1]);
+    state.children.push({id:uid("c"), parentA:pair[0], parentB:pair[1], child});
+    status("両親と子をつなぎました。");
+  } else {
+    status("親子は「親→子（2人）」または「両親＋子（3人）」を選んでください。"); return;
+  }
+  render(); save();
+}
+
+function partnerExists(a,b){
+  return state.partners.some(p => (p.a===a&&p.b===b)||(p.a===b&&p.b===a));
+}
+
+function makeHousehold(){
+  if(selection.length < 2){ status("同居の枠は「2人以上」を選んでください。"); return; }
+  state.households.push({id:uid("h"), members: selection.slice()});
+  status("同居の枠で囲みました。");
+  render(); save();
+}
+
+// ---------- プロパティパネル ----------
+function updatePanel(){
+  const body = document.getElementById("prop-body");
+  if(selection.length === 1){
+    const n = getNode(selection[0]);
+    body.innerHTML = `
+      <div class="field"><label>名前・続柄</label>
+        <input type="text" value="${escapeAttr(n.name)}" oninput="upd('name',this.value)" placeholder="例：本人 / 長男 / 妻"></div>
+      <div class="field"><label>年齢</label>
+        <input type="number" value="${escapeAttr(n.age)}" oninput="upd('age',this.value)" placeholder="例：78"></div>
+      <div class="field"><label>性別</label>
+        <select onchange="upd('sex',this.value)">
+          <option value="male" ${n.sex==='male'?'selected':''}>男性 □</option>
+          <option value="female" ${n.sex==='female'?'selected':''}>女性 ○</option>
+          <option value="unknown" ${n.sex==='unknown'?'selected':''}>不明 △</option>
+        </select></div>
+      <label class="check"><input type="checkbox" ${n.client?'checked':''} onchange="upd('client',this.checked)"> 本人（二重枠）</label>
+      <label class="check"><input type="checkbox" ${n.deceased?'checked':''} onchange="upd('deceased',this.checked)"> 死亡（×印）</label>
+      <label class="check"><input type="checkbox" ${n.keyperson?'checked':''} onchange="upd('keyperson',this.checked)"> キーパーソン（★）</label>
+      <label class="check"><input type="checkbox" ${n.adopted?'checked':''} onchange="upd('adopted',this.checked)"> 養子（破線枠）</label>
+      <button class="btn danger" onclick="deleteSelected()">この人物を削除</button>
+    `;
+  } else if(selection.length > 1){
+    body.innerHTML = `<div class="empty">${selection.length}人を選択中。関係ボタンでつなげます。<br>
+      <button class="btn danger" style="margin-top:8px" onclick="deleteSelected()">選択した人物を削除</button></div>`;
+  } else {
+    body.innerHTML = `<div class="empty">人物を1人選ぶと、ここで名前・年齢などを編集できます。</div>`;
+  }
+  render();
+}
+function upd(key, val){
+  const n = getNode(selection[0]); if(!n) return;
+  n[key] = val;
+  render(); save();
+}
+
+// ---------- 描画 ----------
+function render(){
+  // クリア
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const sel = new Set(selection);
+
+  // 1) 同居の枠（最背面）
+  for(const h of state.households){
+    const pts = h.members.map(getNode).filter(Boolean);
+    if(pts.length < 2) continue;
+    const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
+    const pad = SIZE + 18;
+    const x = Math.min(...xs)-pad, y=Math.min(...ys)-pad;
+    const w = Math.max(...xs)-Math.min(...xs)+pad*2;
+    const hh= Math.max(...ys)-Math.min(...ys)+pad*2;
+    const r = rect(x,y,w,hh);
+    r.setAttribute("rx","14");
+    r.setAttribute("fill","none");
+    r.setAttribute("stroke","#7aa6b0");
+    r.setAttribute("stroke-width","1.4");
+    r.setAttribute("stroke-dasharray","6 4");
+    svg.appendChild(r);
+  }
+
+  // 2) 親子線
+  for(const c of state.children){
+    const child = getNode(c.child); if(!child) continue;
+    let sx, sy;
+    if(c.parentB && getNode(c.parentA) && getNode(c.parentB)){
+      const a=getNode(c.parentA), b=getNode(c.parentB);
+      sx = (a.x+b.x)/2; sy = (a.y+b.y)/2;        // 夫婦線の中点から
+    } else {
+      const a=getNode(c.parentA); if(!a) continue;
+      sx = a.x; sy = a.y + SIZE;                  // ひとり親は下端から
+    }
+    const busY = Math.min(sy, child.y) + Math.abs(child.y - sy)/2;
+    const topY = child.y - SIZE - (child.sex==='male'?0:0);
+    drawPath(`M ${sx} ${sy} V ${busY} H ${child.x} V ${child.y - SIZE}`);
+  }
+
+  // 3) パートナー線（結婚・離婚・内縁）
+  for(const e of state.partners){
+    const a=getNode(e.a), b=getNode(e.b); if(!a||!b) continue;
+    const x1=a.x, y1=a.y, x2=b.x, y2=b.y;
+    if(e.type === 'commonlaw'){
+      const l = line(x1,y1,x2,y2); l.setAttribute("stroke-dasharray","5 4"); svg.appendChild(l);
+    } else if(e.type === 'divorce'){
+      svg.appendChild(line(x1,y1,x2,y2));
+      // 中点付近に // のスラッシュ2本（離婚記号）
+      const mx=(x1+x2)/2, my=(y1+y2)/2;
+      const ang=Math.atan2(y2-y1,x2-x1);
+      for(const d of [-6,6]){
+        const cx=mx + Math.cos(ang)*d, cy=my + Math.sin(ang)*d;
+        svg.appendChild(slash(cx, cy, ang));
+      }
+    } else { // marriage = 二重線
+      const dxp = (y2-y1), dyp = -(x2-x1);
+      const len = Math.hypot(dxp,dyp)||1; const ux=dxp/len*2.2, uy=dyp/len*2.2;
+      svg.appendChild(line(x1+ux,y1+uy,x2+ux,y2+uy));
+      svg.appendChild(line(x1-ux,y1-uy,x2-ux,y2-uy));
+    }
+  }
+
+  // 4) ノード
+  for(const n of state.nodes){
+    const g = document.createElementNS(NS,"g");
+    g.setAttribute("class","node-hit");
+    g.dataset.id = n.id;
+
+    const selected = sel.has(n.id);
+    const sw = selected ? COLORS.sel : COLORS.stroke;
+
+    // 図形
+    if(n.sex === 'male'){
+      const r = rect(n.x-SIZE, n.y-SIZE, SIZE*2, SIZE*2);
+      styleShape(r, sw, n);
+      g.appendChild(r);
+      if(n.client){ const r2=rect(n.x-SIZE+5,n.y-SIZE+5,SIZE*2-10,SIZE*2-10); styleShape(r2,sw,n,true); g.appendChild(r2);}
+    } else if(n.sex === 'female'){
+      const c = circle(n.x, n.y, SIZE);
+      styleShape(c, sw, n);
+      g.appendChild(c);
+      if(n.client){ const c2=circle(n.x,n.y,SIZE-5); styleShape(c2,sw,n,true); g.appendChild(c2);}
+    } else {
+      const t = triangle(n.x, n.y, SIZE);
+      styleShape(t, sw, n);
+      g.appendChild(t);
+      if(n.client){ const t2=triangle(n.x,n.y,SIZE-6); styleShape(t2,sw,n,true); g.appendChild(t2);}
+    }
+
+    // 養子＝破線（最外形を破線化）
+    if(n.adopted){ g.firstChild.setAttribute("stroke-dasharray","5 3"); }
+
+    // 死亡＝×
+    if(n.deceased){
+      g.appendChild(line(n.x-SIZE+4, n.y-SIZE+4, n.x+SIZE-4, n.y+SIZE-4, sw));
+      g.appendChild(line(n.x+SIZE-4, n.y-SIZE+4, n.x-SIZE+4, n.y+SIZE-4, sw));
+    }
+
+    // キーパーソン＝★（右上）
+    if(n.keyperson){ g.appendChild(star(n.x+SIZE-2, n.y-SIZE+2, 9)); }
+
+    // 年齢（中央）
+    if(n.age!=="" && n.age!=null){
+      const ta = text(n.x, n.y+5, String(n.age), 16); ta.setAttribute("font-weight","600"); g.appendChild(ta);
+    }
+    // 名前（下）
+    if(n.name){
+      const tn = text(n.x, n.y+SIZE+15, n.name, 13); g.appendChild(tn);
+    }
+
+    // 選択番号
+    const idx = selection.indexOf(n.id);
+    if(idx>=0){
+      const num = text(n.x-SIZE-6, n.y-SIZE-2, ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"][idx]||String(idx+1), 15);
+      num.setAttribute("class","selnum"); num.setAttribute("text-anchor","end");
+      g.appendChild(num);
+    }
+
+    svg.appendChild(g);
+  }
+}
+
+function styleShape(el, sw, n, inner){
+  el.setAttribute("fill", "#ffffff");
+  el.setAttribute("stroke", sw);
+  el.setAttribute("stroke-width", n.client ? 2.4 : 1.8);
+}
+
+// SVGヘルパ
+function rect(x,y,w,h){ const e=document.createElementNS(NS,"rect"); e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("width",w);e.setAttribute("height",h); return e; }
+function circle(cx,cy,r){ const e=document.createElementNS(NS,"circle"); e.setAttribute("cx",cx);e.setAttribute("cy",cy);e.setAttribute("r",r); return e; }
+function triangle(cx,cy,r){ const e=document.createElementNS(NS,"polygon");
+  const p=[[cx,cy-r],[cx-r*0.95,cy+r*0.8],[cx+r*0.95,cy+r*0.8]].map(a=>a.join(",")).join(" ");
+  e.setAttribute("points",p); return e; }
+function line(x1,y1,x2,y2,stroke){ const e=document.createElementNS(NS,"line");
+  e.setAttribute("x1",x1);e.setAttribute("y1",y1);e.setAttribute("x2",x2);e.setAttribute("y2",y2);
+  e.setAttribute("stroke",stroke||COLORS.line);e.setAttribute("stroke-width","1.7"); return e; }
+function slash(cx,cy,ang){
+  // 線分方向angに対して斜めの短い線（離婚記号 //）
+  const a = ang - Math.PI/4;
+  const dx=Math.cos(a)*8, dy=Math.sin(a)*8;
+  const e=line(cx-dx,cy-dy,cx+dx,cy+dy); e.setAttribute("stroke-width","1.7"); return e;
+}
+function drawPath(d){ const e=document.createElementNS(NS,"path"); e.setAttribute("d",d);
+  e.setAttribute("fill","none"); e.setAttribute("stroke",COLORS.line); e.setAttribute("stroke-width","1.7"); svg.appendChild(e); return e; }
+function text(x,y,str,size){ const e=document.createElementNS(NS,"text");
+  e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("text-anchor","middle");
+  e.setAttribute("font-size",size||13);e.setAttribute("fill",COLORS.text);
+  e.setAttribute("font-family",'-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",sans-serif');
+  e.textContent=str; return e; }
+function star(cx,cy,r){
+  const e=document.createElementNS(NS,"polygon");
+  let pts=[];
+  for(let i=0;i<10;i++){ const rr=i%2?r*0.45:r; const a=-Math.PI/2 + i*Math.PI/5;
+    pts.push((cx+Math.cos(a)*rr)+","+(cy+Math.sin(a)*rr)); }
+  e.setAttribute("points",pts.join(" ")); e.setAttribute("fill",COLORS.star);
+  e.setAttribute("stroke",COLORS.starline); e.setAttribute("stroke-width","0.8"); return e;
+}
+
+// ---------- ドラッグ / クリック ----------
+let drag = null;
+svg.addEventListener("pointerdown", (ev) => {
+  const g = ev.target.closest(".node-hit");
+  if(g){
+    const id = g.dataset.id;
+    const n = getNode(id);
+    const pt = svgPoint(ev);
+    drag = { id, dx: n.x-pt.x, dy: n.y-pt.y, moved:false, started:performance? performance.now():0 };
+    svg.setPointerCapture(ev.pointerId);
+  } else {
+    // 背景クリック＝選択解除
+    if(!ev.shiftKey){ selection=[]; updatePanel(); }
+  }
+});
+svg.addEventListener("pointermove",(ev)=>{
+  if(!drag) return;
+  const pt = svgPoint(ev);
+  const n = getNode(drag.id); if(!n) return;
+  n.x = Math.round(pt.x + drag.dx);
+  n.y = Math.round(pt.y + drag.dy);
+  drag.moved = true;
+  render();
+});
+svg.addEventListener("pointerup",(ev)=>{
+  if(drag){
+    if(!drag.moved){
+      // クリック＝選択トグル（Shiftで追加、なければ単独 or 追加選択）
+      if(ev.shiftKey){ toggleSelect(drag.id); }
+      else {
+        // 既に複数選択中で、別ノードをクリックしたら単独選択に
+        if(selection.length===1 && selection[0]===drag.id){ /* keep */ }
+        // 関係づくりのため、単独クリックも「追加」できると便利。ここは単独選択優先。
+        selectOnly(drag.id);
+      }
+      render();
+    } else { save(); }
+    drag = null;
+  }
+});
+// Shiftクリックで複数追加できるよう、pointerupで処理済み。
+// 追加選択（番号付け）を主操作にしたい場合のため、通常クリックでも追加したい人向けに右クリック追加も用意
+svg.addEventListener("contextmenu",(ev)=>{
+  const g = ev.target.closest(".node-hit");
+  if(g){ ev.preventDefault(); toggleSelect(g.dataset.id); render(); }
+});
+
+function svgPoint(ev){
+  const r = svg.getBoundingClientRect();
+  return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+}
+
+document.addEventListener("keydown",(e)=>{
+  if((e.key==="Delete"||e.key==="Backspace") && selection.length && !isTyping()){
+    e.preventDefault(); deleteSelected();
+  }
+});
+function isTyping(){ const t=document.activeElement; return t && (t.tagName==="INPUT"||t.tagName==="SELECT"||t.tagName==="TEXTAREA"); }
+
+// ---------- 画像出力 ----------
+function exportImage(type){
+  const b = computeBounds();
+  const scale = 2;
+  const margin = 40;
+  const W = (b.w + margin*2), H = (b.h + margin*2);
+
+  const clone = svg.cloneNode(true);
+  // 選択ハイライト・選択番号を消す
+  clone.querySelectorAll(".selnum").forEach(e=>e.remove());
+  clone.querySelectorAll("[stroke='"+COLORS.sel+"']").forEach(e=>e.setAttribute("stroke",COLORS.stroke));
+  clone.setAttribute("width", W);
+  clone.setAttribute("height", H);
+  clone.setAttribute("viewBox", `${b.x-margin} ${b.y-margin} ${W} ${H}`);
+  clone.setAttribute("xmlns", NS);
+
+  const svgStr = new XMLSerializer().serializeToString(clone);
+  const img = new Image();
+  const svg64 = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr);
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = W*scale; canvas.height = H*scale;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    const mime = type==='jpeg' ? "image/jpeg" : "image/png";
+    const url = canvas.toDataURL(mime, 0.95);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "genogram." + (type==='jpeg'?"jpg":"png");
+    a.click();
+    status("画像を保存しました（ダウンロードフォルダ）。");
+  };
+  img.onerror = () => status("画像の生成に失敗しました。");
+  img.src = svg64;
+}
+
+function computeBounds(){
+  if(!state.nodes.length) return {x:0,y:0,w:400,h:300};
+  const xs=[], ys=[];
+  for(const n of state.nodes){ xs.push(n.x-SIZE-30, n.x+SIZE+30); ys.push(n.y-SIZE-10, n.y+SIZE+30); }
+  for(const h of state.households){ const ms=h.members.map(getNode).filter(Boolean);
+    for(const m of ms){ xs.push(m.x-SIZE-50, m.x+SIZE+50); ys.push(m.y-SIZE-50, m.y+SIZE+50);} }
+  const x=Math.min(...xs), y=Math.min(...ys);
+  return { x, y, w: Math.max(...xs)-x, h: Math.max(...ys)-y };
+}
+
+// ---------- 保存・読込 ----------
+function saveJSON(){
+  const data = JSON.stringify({state, idc}, null, 2);
+  const blob = new Blob([data], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "genogram-data.json";
+  a.click();
+  status("データを保存しました（あとで読込で再編集できます）。");
+}
+function loadJSON(ev){
+  const f = ev.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try{
+      const o = JSON.parse(r.result);
+      state = o.state; idc = o.idc || 1000;
+      selection = [];
+      render(); updatePanel(); save();
+      status("データを読み込みました。");
+    }catch(e){ status("読込に失敗しました。ファイル形式をご確認ください。"); }
+    ev.target.value = "";
+  };
+  r.readAsText(f);
+}
+function clearAll(){
+  if(!confirm("すべての内容を消去します。よろしいですか？")) return;
+  state = { nodes:[], partners:[], children:[], households:[], title:"" };
+  selection=[]; idc=1;
+  render(); updatePanel(); save();
+}
+
+// ---------- 自動保存（ブラウザ内） ----------
+function save(){ try{ localStorage.setItem("genogram", JSON.stringify({state, idc})); }catch(e){} }
+function load(){
+  try{ const o = JSON.parse(localStorage.getItem("genogram"));
+    if(o && o.state){ state=o.state; idc=o.idc||1; } }catch(e){}
+}
+
+function status(msg){ document.getElementById("status").textContent = msg; }
+function escapeAttr(s){ return String(s==null?"":s).replace(/"/g,"&quot;"); }
+
+// ---------- 初期化 ----------
+load();
+render();
+updatePanel();
+</script>
+</body>
+</html>
