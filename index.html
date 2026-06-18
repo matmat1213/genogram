@@ -98,6 +98,12 @@
   }
   details summary { cursor: pointer; font-size: 12px; color: var(--accent-dark); margin-bottom:6px; }
   kbd { background:#eee; border:1px solid #ccc; border-radius:4px; padding:0 4px; font-size:11px; }
+  .hh-item { display:flex; align-items:center; gap:6px; border:1px solid var(--border); border-radius:6px; padding:5px 7px; margin-bottom:5px; font-size:13px; }
+  .hh-item.on { border-color: var(--select); background:#fff4ec; }
+  .hh-name { flex:1; cursor:pointer; }
+  .hh-name:hover { color: var(--accent-dark); }
+  .hh-del { border:none; background:none; cursor:pointer; font-size:15px; padding:2px 4px; border-radius:4px; }
+  .hh-del:hover { background:#fbeae6; }
 </style>
 </head>
 <body>
@@ -126,6 +132,12 @@
         <button class="btn" onclick="connectChild()">↳ 親子（親→子の順で選択）</button>
         <button class="btn" onclick="makeHousehold()">⬚ 同居の枠で囲む（複数選択）</button>
         <button class="btn danger" onclick="clearSelection()">選択を解除</button>
+      </div>
+
+      <div class="sec" id="hh-sec" style="display:none">
+        <h2>同居の枠の一覧</h2>
+        <div id="hh-list"></div>
+        <div class="empty" style="margin-top:4px">枠名をクリックで選択、🗑で削除できます。</div>
       </div>
 
       <div class="sec" id="prop-sec">
@@ -344,12 +356,17 @@ function render(){
   while(svg.firstChild) svg.removeChild(svg.firstChild);
   const sel = new Set(selection);
 
-  // 1) 同居の枠（最背面）
-  for(const h of state.households){
+  // 1) 同居の枠（最背面）。重なっても見分け／選択できるよう、面積順に同心状に配置し、
+  //    小さい枠ほど内側＆上に描く（＝クリックで個別に選べる）。
+  const rankOf = new Map(
+    state.households.slice().sort((a,b)=>householdArea(a)-householdArea(b)).map((h,i)=>[h.id,i])
+  );
+  const drawOrder = state.households.slice().sort((a,b)=>householdArea(b)-householdArea(a)); // 大きい枠を先（背面）に
+  drawOrder.forEach((h)=>{
     const pts = h.members.map(getNode).filter(Boolean);
-    if(pts.length < 2) continue;
+    if(pts.length < 2) return;
     const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
-    const pad = SIZE + 18;
+    const pad = SIZE + 18 + rankOf.get(h.id)*10;   // 小さい枠ほど内側に
     const x = Math.min(...xs)-pad, y=Math.min(...ys)-pad;
     const w = Math.max(...xs)-Math.min(...xs)+pad*2;
     const hh= Math.max(...ys)-Math.min(...ys)+pad*2;
@@ -368,7 +385,7 @@ function render(){
     r.setAttribute("stroke-dasharray","6 4");
     g.appendChild(r);
     svg.appendChild(g);
-  }
+  });
 
   // 2) 親子線
   for(const c of state.children){
@@ -429,26 +446,33 @@ function render(){
     const selected = sel.has(n.id);
     const sw = selected ? COLORS.sel : COLORS.stroke;
 
+    // クリック領域（記号の中ならどこでも選択・ドラッグ可）
+    const nhit = rect(n.x-SIZE-3, n.y-SIZE-3, SIZE*2+6, SIZE*2+6);
+    nhit.setAttribute("fill","transparent");
+    nhit.setAttribute("pointer-events","all");
+    g.appendChild(nhit);
+
     // 図形
+    let shape;
     if(n.sex === 'male'){
-      const r = rect(n.x-SIZE, n.y-SIZE, SIZE*2, SIZE*2);
-      styleShape(r, sw, n);
-      g.appendChild(r);
+      shape = rect(n.x-SIZE, n.y-SIZE, SIZE*2, SIZE*2);
+      styleShape(shape, sw, n);
+      g.appendChild(shape);
       if(n.client){ const r2=rect(n.x-SIZE+5,n.y-SIZE+5,SIZE*2-10,SIZE*2-10); styleShape(r2,sw,n,true); g.appendChild(r2);}
     } else if(n.sex === 'female'){
-      const c = circle(n.x, n.y, SIZE);
-      styleShape(c, sw, n);
-      g.appendChild(c);
+      shape = circle(n.x, n.y, SIZE);
+      styleShape(shape, sw, n);
+      g.appendChild(shape);
       if(n.client){ const c2=circle(n.x,n.y,SIZE-5); styleShape(c2,sw,n,true); g.appendChild(c2);}
     } else {
-      const t = triangle(n.x, n.y, SIZE);
-      styleShape(t, sw, n);
-      g.appendChild(t);
+      shape = triangle(n.x, n.y, SIZE);
+      styleShape(shape, sw, n);
+      g.appendChild(shape);
       if(n.client){ const t2=triangle(n.x,n.y,SIZE-6); styleShape(t2,sw,n,true); g.appendChild(t2);}
     }
 
     // 養子＝破線（最外形を破線化）
-    if(n.adopted){ g.firstChild.setAttribute("stroke-dasharray","5 3"); }
+    if(n.adopted){ shape.setAttribute("stroke-dasharray","5 3"); }
 
     // 死亡＝×
     if(n.deceased){
@@ -478,6 +502,31 @@ function render(){
 
     svg.appendChild(g);
   }
+
+  updateHouseholdList();
+}
+
+function householdArea(h){
+  const pts=h.members.map(getNode).filter(Boolean);
+  if(pts.length<2) return 0;
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  return (Math.max(...xs)-Math.min(...xs)+1)*(Math.max(...ys)-Math.min(...ys)+1);
+}
+
+function updateHouseholdList(){
+  const sec = document.getElementById("hh-sec");
+  const list = document.getElementById("hh-list");
+  if(!sec || !list) return;
+  if(!state.households.length){ sec.style.display="none"; list.innerHTML=""; return; }
+  sec.style.display="";
+  list.innerHTML = state.households.map((h,i)=>{
+    const names = h.members.map(m=>{const n=getNode(m); return n?(n.name||"(無名)"):null;}).filter(Boolean).join("・");
+    const on = isElSel('household', h.id);
+    return `<div class="hh-item${on?' on':''}">
+      <span class="hh-name" onclick="selectElement('household','${h.id}')">枠${i+1}：${escapeAttr(names)}</span>
+      <button class="hh-del" title="この枠を削除" onclick="selEl={type:'household',id:'${h.id}'};deleteElement();">🗑</button>
+    </div>`;
+  }).join("");
 }
 
 function styleShape(el, sw, n, inner){
