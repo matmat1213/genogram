@@ -104,6 +104,18 @@
   .hh-name:hover { color: var(--accent-dark); }
   .hh-del { border:none; background:none; cursor:pointer; font-size:15px; padding:2px 4px; border-radius:4px; }
   .hh-del:hover { background:#fbeae6; }
+
+  /* スマホ・タブレット対応 */
+  @media (max-width: 820px){
+    #main { flex-direction: column; }
+    #canvas-wrap { height: 50vh; min-height: 260px; flex: none; border-bottom: 3px solid var(--accent); }
+    #sidebar { width: 100%; border-right: none; flex: 1; min-height: 0; }
+    header h1 { font-size: 15px; }
+    header .hint { display: none; }
+    .btn { padding: 11px 10px; font-size: 14px; }   /* タップしやすく */
+    .field input[type=text], .field input[type=number], .field select { padding: 9px 10px; font-size: 16px; }
+    .check { font-size: 14px; }
+  }
 </style>
 </head>
 <body>
@@ -140,7 +152,8 @@
 
       <div class="sec">
         <h2>関係でつなぐ <span style="font-weight:400;color:var(--muted)">（人物を選択）</span></h2>
-        <div class="empty" id="rel-hint">人物をクリックで選択（複数は続けてクリック）。番号①②の順で結ばれます。</div>
+        <button class="btn" id="multiBtn" onclick="toggleMulti()">☑️ 複数選択モード：OFF</button>
+        <div class="empty" id="rel-hint">2人以上を選ぶときは「複数選択モード」をONにして、人物を順にタップ。番号①②…の順で結ばれます（スマホはこの方法）。</div>
         <button class="btn" onclick="connect('marriage')">⚭ 結婚（②を結ぶ）</button>
         <button class="btn" onclick="connect('commonlaw')">〜 内縁・事実婚</button>
         <button class="btn" onclick="connect('divorce')">／／ 離婚</button>
@@ -196,7 +209,7 @@
     </div>
 
     <div id="canvas-wrap">
-      <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 600" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
   </div>
 </div>
@@ -208,10 +221,12 @@
 let state = { nodes: [], partners: [], children: [], households: [], title: "" };
 let selection = [];            // 選択中ノードidの配列（順序保持）
 let selEl = null;              // 選択中の線・枠 {type:'partner'|'child'|'household', id}
+let multiMode = false;         // 複数選択モード（スマホでも複数選べる）
 let idc = 1;
 const NS = "http://www.w3.org/2000/svg";
 const svg = document.getElementById("svg");
 
+const VBW = 820, VBH = 600;    // 作図キャンバスの論理サイズ（画面に合わせて拡大縮小）
 const SIZE = 30;               // 図形の半径相当（四角は半辺）
 const COLORS = { stroke:"#1d2b33", text:"#1d2b33", line:"#1d2b33", sel:"#ff8c42", star:"#e6a700", starline:"#b58600" };
 
@@ -288,6 +303,19 @@ function toggleSelect(id){
   updatePanel();
 }
 function clearSelection(){ selection = []; selEl = null; updatePanel(); render(); }
+
+// 複数選択モード（スマホでも結婚・親子・同居枠の選択ができる）
+function toggleMulti(){
+  multiMode = !multiMode;
+  updateMultiButton();
+  status(multiMode ? "複数選択モード：ON ― 人物を順にタップしてください。" : "複数選択モード：OFF");
+}
+function updateMultiButton(){
+  const b=document.getElementById("multiBtn");
+  if(!b) return;
+  b.textContent = multiMode ? "✅ 複数選択モード：ON" : "☑️ 複数選択モード：OFF";
+  b.classList.toggle("primary", multiMode);
+}
 
 // 線・枠の選択／削除
 function selectElement(type, id){ selEl = {type, id}; selection = []; updatePanel(); }
@@ -633,7 +661,7 @@ svg.addEventListener("pointerdown", (ev) => {
     const id = g.dataset.id;
     const n = getNode(id);
     const pt = svgPoint(ev);
-    drag = { id, dx: n.x-pt.x, dy: n.y-pt.y, moved:false };
+    drag = { id, dx: n.x-pt.x, dy: n.y-pt.y, sx:pt.x, sy:pt.y, moved:false };
     svg.setPointerCapture(ev.pointerId);
     return;
   }
@@ -643,29 +671,27 @@ svg.addEventListener("pointerdown", (ev) => {
     selectElement(el.dataset.el, el.dataset.id);
     return;
   }
-  // 背景クリック＝選択解除
-  selection=[]; selEl=null; updatePanel();
+  // 背景クリック＝選択解除（複数選択モード中は人物の選択を保持）
+  if(!multiMode){ selection=[]; }
+  selEl=null; updatePanel();
 });
 svg.addEventListener("pointermove",(ev)=>{
   if(!drag) return;
   const pt = svgPoint(ev);
+  // 微小な指のブレはタップ扱い（しきい値を超えてから移動開始）
+  if(!drag.moved && Math.hypot(pt.x-drag.sx, pt.y-drag.sy) < 5) return;
   const n = getNode(drag.id); if(!n) return;
-  n.x = Math.round(pt.x + drag.dx);
-  n.y = Math.round(pt.y + drag.dy);
+  n.x = Math.round(clampX(pt.x + drag.dx));
+  n.y = Math.round(clampY(pt.y + drag.dy));
   drag.moved = true;
   render();
 });
 svg.addEventListener("pointerup",(ev)=>{
   if(drag){
     if(!drag.moved){
-      // クリック＝選択トグル（Shiftで追加、なければ単独 or 追加選択）
-      if(ev.shiftKey){ toggleSelect(drag.id); }
-      else {
-        // 既に複数選択中で、別ノードをクリックしたら単独選択に
-        if(selection.length===1 && selection[0]===drag.id){ /* keep */ }
-        // 関係づくりのため、単独クリックも「追加」できると便利。ここは単独選択優先。
-        selectOnly(drag.id);
-      }
+      // タップ＝選択。複数選択モードON、またはShiftキーで「追加選択」
+      if(multiMode || ev.shiftKey){ toggleSelect(drag.id); }
+      else { selectOnly(drag.id); }
       render();
     } else { save(); }
     drag = null;
@@ -679,9 +705,17 @@ svg.addEventListener("contextmenu",(ev)=>{
 });
 
 function svgPoint(ev){
+  // viewBox（拡大縮小）を考慮して画面座標→論理座標へ変換
+  const ctm = svg.getScreenCTM();
+  if(ctm){
+    const p = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(ctm.inverse());
+    return { x: p.x, y: p.y };
+  }
   const r = svg.getBoundingClientRect();
   return { x: ev.clientX - r.left, y: ev.clientY - r.top };
 }
+function clampX(v){ return Math.max(SIZE+4, Math.min(VBW-SIZE-4, v)); }
+function clampY(v){ return Math.max(SIZE+4, Math.min(VBH-SIZE-22, v)); }
 
 document.addEventListener("keydown",(e)=>{
   if((e.key==="Delete"||e.key==="Backspace") && !isTyping()){
@@ -790,6 +824,7 @@ function safeName(){
 // ---------- 初期化 ----------
 load();
 syncTitleInput();
+updateMultiButton();
 render();
 updatePanel();
 </script>
