@@ -167,6 +167,17 @@
       </div>
 
       <div class="sec">
+        <h2>死亡の表し方</h2>
+        <div class="field">
+          <select id="deathStyle" onchange="setDeathStyle(this.value)">
+            <option value="fill">黒塗り（■ ●）</option>
+            <option value="x">×印</option>
+          </select>
+        </div>
+        <div class="empty">図全体に適用されます。地域の慣習に合わせて選べます。</div>
+      </div>
+
+      <div class="sec">
         <h2>関係でつなぐ <span style="font-weight:400;color:var(--muted)">（人物を選択）</span></h2>
         <button class="btn" id="multiBtn" onclick="toggleMulti()">☑️ 複数選択モード：OFF</button>
         <div class="empty" id="rel-hint">2人以上を選ぶときは「複数選択モード」をONにして、人物を順にタップ。番号①②…の順で結ばれます（スマホはこの方法）。</div>
@@ -208,7 +219,7 @@
           <div class="row"><svg viewBox="0 0 40 24"><rect x="6" y="3" width="18" height="18" fill="none" stroke="#222" stroke-width="1.5"/></svg> 男性</div>
           <div class="row"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="none" stroke="#222" stroke-width="1.5"/></svg> 女性</div>
           <div class="row"><svg viewBox="0 0 40 24"><rect x="4" y="2" width="20" height="20" fill="none" stroke="#222" stroke-width="3"/></svg> 本人（二重枠）</div>
-          <div class="row"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="none" stroke="#222" stroke-width="1.5"/><line x1="6" y1="3" x2="24" y2="21" stroke="#222" stroke-width="1.5"/><line x1="24" y1="3" x2="6" y2="21" stroke="#222" stroke-width="1.5"/></svg> 死亡（×印）</div>
+          <div class="row"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="#1d2b33" stroke="#222" stroke-width="1.5"/></svg> 死亡（黒塗り、設定で×印に変更可）</div>
           <div class="row"><svg viewBox="0 0 40 24"><polygon points="15,18 11,12 19,12" fill="#e6a700" stroke="#b58600" stroke-width="1"/></svg> キーパーソン（★）</div>
           <div class="row">数字＝年齢、図形の下＝名前</div>
         </div>
@@ -240,7 +251,7 @@
 "use strict";
 
 // ---------- 状態 ----------
-let state = { nodes: [], partners: [], children: [], households: [], texts: [], title: "" };
+let state = { nodes: [], partners: [], children: [], households: [], texts: [], title: "", deathStyle: "fill" };
 let selection = [];            // 選択中ノードidの配列（順序保持）
 let selEl = null;              // 選択中の線・枠 {type:'partner'|'child'|'household', id}
 let multiMode = false;         // 複数選択モード（スマホでも複数選べる）
@@ -279,6 +290,10 @@ function getNode(id){ return state.nodes.find(n => n.id === id); }
 function setTitle(v){ state.title = v; save(); }
 function syncTitleInput(){ const el=document.getElementById("clientName"); if(el) el.value = state.title || ""; }
 
+// 死亡の表し方（黒塗り／×印）
+function setDeathStyle(v){ state.deathStyle = v; render(); save(); }
+function syncDeathStyleSelect(){ const el=document.getElementById("deathStyle"); if(el) el.value = state.deathStyle || "fill"; }
+
 // 自由テキスト
 function getText(id){ return (state.texts||[]).find(t=>t.id===id); }
 function addText(){
@@ -301,7 +316,8 @@ function mkNode(sex,x,y,name){
 function applyTemplate(kind){
   if(state.nodes.length && !confirm("現在の作図内容を消してテンプレートを読み込みます。よろしいですか？\n（必要なら先に「データ保存」をしてください）")) return;
   const keepTitle = state.title || "";
-  state = { nodes:[], partners:[], children:[], households:[], texts:[], title: keepTitle };
+  const keepDeath = state.deathStyle || "fill";
+  state = { nodes:[], partners:[], children:[], households:[], texts:[], title: keepTitle, deathStyle: keepDeath };
   selection=[]; selEl=null;
   if(kind==='couple'){
     const h=mkNode('male',320,210,'夫'), w=mkNode('female',480,210,'妻');
@@ -454,7 +470,7 @@ function updatePanel(){
           <option value="unknown" ${n.sex==='unknown'?'selected':''}>不明 △</option>
         </select></div>
       <label class="check"><input type="checkbox" ${n.client?'checked':''} onchange="upd('client',this.checked)"> 本人（二重枠）</label>
-      <label class="check"><input type="checkbox" ${n.deceased?'checked':''} onchange="upd('deceased',this.checked)"> 死亡（×印）</label>
+      <label class="check"><input type="checkbox" ${n.deceased?'checked':''} onchange="upd('deceased',this.checked)"> 死亡</label>
       <label class="check"><input type="checkbox" ${n.keyperson?'checked':''} onchange="upd('keyperson',this.checked)"> キーパーソン（★）</label>
       <label class="check"><input type="checkbox" ${n.adopted?'checked':''} onchange="upd('adopted',this.checked)"> 養子（破線枠）</label>
       <button class="btn danger" onclick="deleteSelected()">この人物を削除</button>
@@ -622,8 +638,8 @@ function render(){
     // 養子＝破線（最外形を破線化）
     if(n.adopted){ shape.setAttribute("stroke-dasharray","5 3"); }
 
-    // 死亡＝×
-    if(n.deceased){
+    // 死亡＝×（×印モードのときだけ。黒塗りモードでは塗りつぶしで表現）
+    if(n.deceased && state.deathStyle === 'x'){
       g.appendChild(line(n.x-SIZE+4, n.y-SIZE+4, n.x+SIZE-4, n.y+SIZE-4, sw));
       g.appendChild(line(n.x+SIZE-4, n.y-SIZE+4, n.x-SIZE+4, n.y+SIZE-4, sw));
     }
@@ -631,9 +647,11 @@ function render(){
     // キーパーソン＝★（右上）
     if(n.keyperson){ g.appendChild(star(n.x+SIZE-2, n.y-SIZE+2, 9)); }
 
-    // 年齢（中央）
+    // 年齢（中央）。黒塗りの上は白文字で見やすく
     if(n.age!=="" && n.age!=null){
-      const ta = text(n.x, n.y+5, String(n.age), 16); ta.setAttribute("font-weight","600"); g.appendChild(ta);
+      const ta = text(n.x, n.y+5, String(n.age), 16); ta.setAttribute("font-weight","600");
+      if(n.deceased && state.deathStyle !== 'x') ta.setAttribute("fill","#ffffff");
+      g.appendChild(ta);
     }
     // 名前（下）
     if(n.name){
@@ -678,7 +696,8 @@ function updateHouseholdList(){
 }
 
 function styleShape(el, sw, n, inner){
-  el.setAttribute("fill", "#ffffff");
+  const filled = n.deceased && (state.deathStyle !== 'x');   // 死亡＝黒塗り
+  el.setAttribute("fill", filled ? COLORS.stroke : "#ffffff");
   el.setAttribute("stroke", sw);
   el.setAttribute("stroke-width", n.client ? 2.4 : 1.8);
 }
@@ -957,8 +976,9 @@ function loadJSON(ev){
       const o = JSON.parse(r.result);
       state = o.state; idc = o.idc || 1000;
       if(!state.texts) state.texts = [];
+      if(!state.deathStyle) state.deathStyle = "fill";
       selection = []; selEl = null;
-      syncTitleInput();
+      syncTitleInput(); syncDeathStyleSelect();
       render(); updatePanel(); fitView(); save();
       status("データを読み込みました。");
     }catch(e){ status("読込に失敗しました。ファイル形式をご確認ください。"); }
@@ -968,9 +988,9 @@ function loadJSON(ev){
 }
 function clearAll(){
   if(!confirm("すべての内容を消去します。よろしいですか？")) return;
-  state = { nodes:[], partners:[], children:[], households:[], texts:[], title:"" };
+  state = { nodes:[], partners:[], children:[], households:[], texts:[], title:"", deathStyle:"fill" };
   selection=[]; selEl=null; idc=1;
-  syncTitleInput();
+  syncTitleInput(); syncDeathStyleSelect();
   view={x:0,y:0,w:VBW,h:VBH}; applyView();
   render(); updatePanel(); save();
 }
@@ -979,7 +999,7 @@ function clearAll(){
 function save(){ try{ localStorage.setItem("genogram", JSON.stringify({state, idc})); }catch(e){} }
 function load(){
   try{ const o = JSON.parse(localStorage.getItem("genogram"));
-    if(o && o.state){ state=o.state; idc=o.idc||1; if(!state.texts) state.texts=[]; } }catch(e){}
+    if(o && o.state){ state=o.state; idc=o.idc||1; if(!state.texts) state.texts=[]; if(!state.deathStyle) state.deathStyle="fill"; } }catch(e){}
 }
 
 function status(msg){ document.getElementById("status").textContent = msg; }
@@ -992,6 +1012,7 @@ function safeName(){
 // ---------- 初期化 ----------
 load();
 syncTitleInput();
+syncDeathStyleSelect();
 updateMultiButton();
 render();
 updatePanel();
