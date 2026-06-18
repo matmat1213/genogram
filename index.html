@@ -115,6 +115,21 @@
   <div id="main">
     <div id="sidebar">
       <div class="sec">
+        <h2>利用者名</h2>
+        <div class="field">
+          <input type="text" id="clientName" placeholder="例：田中 花子" oninput="setTitle(this.value)">
+        </div>
+        <div class="empty">入力すると、保存ファイル名に自動で使われます（例：田中 花子.png）。</div>
+      </div>
+
+      <div class="sec">
+        <h2>テンプレートから作成</h2>
+        <button class="btn" onclick="applyTemplate('couple')">👫 夫婦だけ（同居）</button>
+        <button class="btn" onclick="applyTemplate('couple2kids')">👨‍👩‍👧‍👦 夫婦＋子ども2人（同居は夫婦のみ）</button>
+        <div class="empty">読み込むと現在の作図内容は置き換わります。</div>
+      </div>
+
+      <div class="sec">
         <h2>人物を追加</h2>
         <div class="btn-row">
           <button class="btn" onclick="addNode('male')">□ 男性</button>
@@ -222,6 +237,36 @@ function addNode(sex){
 }
 
 function getNode(id){ return state.nodes.find(n => n.id === id); }
+
+// 利用者名
+function setTitle(v){ state.title = v; save(); }
+function syncTitleInput(){ const el=document.getElementById("clientName"); if(el) el.value = state.title || ""; }
+
+// テンプレート
+function mkNode(sex,x,y,name){
+  const n={id:uid("n"),sex,x,y,name,age:"",deceased:false,client:false,keyperson:false,adopted:false};
+  state.nodes.push(n); return n;
+}
+function applyTemplate(kind){
+  if(state.nodes.length && !confirm("現在の作図内容を消してテンプレートを読み込みます。よろしいですか？\n（必要なら先に「データ保存」をしてください）")) return;
+  const keepTitle = state.title || "";
+  state = { nodes:[], partners:[], children:[], households:[], title: keepTitle };
+  selection=[]; selEl=null;
+  if(kind==='couple'){
+    const h=mkNode('male',320,210,'夫'), w=mkNode('female',480,210,'妻');
+    state.partners.push({id:uid("p"),a:h.id,b:w.id,type:'marriage'});
+    state.households.push({id:uid("h"),members:[h.id,w.id]});
+  } else if(kind==='couple2kids'){
+    const h=mkNode('male',320,170,'夫'), w=mkNode('female',500,170,'妻');
+    const s=mkNode('male',360,390,'長男'), d=mkNode('female',540,390,'長女');
+    state.partners.push({id:uid("p"),a:h.id,b:w.id,type:'marriage'});
+    state.children.push({id:uid("c"),parentA:h.id,parentB:w.id,child:s.id});
+    state.children.push({id:uid("c"),parentA:h.id,parentB:w.id,child:d.id});
+    state.households.push({id:uid("h"),members:[h.id,w.id]});  // 同居は夫婦だけ
+  }
+  render(); updatePanel(); save();
+  status("テンプレートを読み込みました。利用者ご本人に「本人（二重枠）」を付けるなど調整してください。");
+}
 
 function deleteSelected(){
   if(!selection.length) return;
@@ -676,7 +721,7 @@ function exportImage(type){
     const url = canvas.toDataURL(mime, 0.95);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "genogram." + (type==='jpeg'?"jpg":"png");
+    a.download = safeName() + "." + (type==='jpeg'?"jpg":"png");
     a.click();
     status("画像を保存しました（ダウンロードフォルダ）。");
   };
@@ -700,7 +745,7 @@ function saveJSON(){
   const blob = new Blob([data], {type:"application/json"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "genogram-data.json";
+  a.download = safeName() + ".json";
   a.click();
   status("データを保存しました（あとで読込で再編集できます）。");
 }
@@ -711,7 +756,8 @@ function loadJSON(ev){
     try{
       const o = JSON.parse(r.result);
       state = o.state; idc = o.idc || 1000;
-      selection = [];
+      selection = []; selEl = null;
+      syncTitleInput();
       render(); updatePanel(); save();
       status("データを読み込みました。");
     }catch(e){ status("読込に失敗しました。ファイル形式をご確認ください。"); }
@@ -722,7 +768,8 @@ function loadJSON(ev){
 function clearAll(){
   if(!confirm("すべての内容を消去します。よろしいですか？")) return;
   state = { nodes:[], partners:[], children:[], households:[], title:"" };
-  selection=[]; idc=1;
+  selection=[]; selEl=null; idc=1;
+  syncTitleInput();
   render(); updatePanel(); save();
 }
 
@@ -735,9 +782,14 @@ function load(){
 
 function status(msg){ document.getElementById("status").textContent = msg; }
 function escapeAttr(s){ return String(s==null?"":s).replace(/"/g,"&quot;"); }
+function safeName(){
+  const t=(state.title||"").trim().replace(/[\\\/:*?"<>|]/g,"_");
+  return t || "ジェノグラム";
+}
 
 // ---------- 初期化 ----------
 load();
+syncTitleInput();
 render();
 updatePanel();
 </script>
