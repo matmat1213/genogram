@@ -77,7 +77,10 @@
     width: 100%;
     margin-bottom: 6px;
   }
+  .btn { text-decoration: none; }
   .btn:hover { background: #eef4f5; border-color: var(--accent); }
+  .btn.guide { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+  .btn.guide:hover { background: #e9742f; border-color: #e9742f; }
   .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   .btn.primary:hover { background: var(--accent-dark); }
   .btn.danger { color: var(--danger); }
@@ -136,6 +139,10 @@
   </header>
   <div id="main">
     <div id="sidebar">
+      <div class="sec">
+        <a class="btn guide" href="使い方ガイド.html" target="_blank" rel="noopener">📖 使い方ガイドを開く</a>
+      </div>
+
       <div class="sec">
         <h2>利用者名</h2>
         <div class="field">
